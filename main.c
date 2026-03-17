@@ -5,55 +5,37 @@
 #include <stdint.h>
 #include <time.h>
 
-// Simple compare strings function
+#define SMODEL_WRITE 2
+#define SMODEL_WRITEFREE 1
+#define SMODEL_FREE 0
+
+#define SMODEL_VERSION 1
+
+// compare strings function
 int cmat(char* a, char* b) {
-    if (strlen(a)!=strlen(b)) {
-        return 0;
-    }
-    for (int i=0;i<strlen(a);i++) {
-        if (a[i]!=b[i]) {
-            return 0;
-        }
-    }   
-    return 1;
+    char *ca=a, *cb=b;
+    while (*(ca++)==*(cb++)) if (*ca==0&&*cb==0) return 1;
+    return 0;
 }
 
-// Simple power
+// power function
 int apow(int a, int b) {
-    if (b==0) {
-        return 1;
-    }
-    int result = a;
-    for (int i=0;i<b-1;i++) {
-        result*=a;
-    }
-    return result;
+    int result;
+    for (int i=0, result=a;i<b-1;i++,result*=a);
+    return (b==0)?1:result;
 }
 
 // String to int
-int stoi(char* str) {
-    int result = 0;
-    int is_negative = 0;
-    int alen = strlen(str);
-    if (str[0]=='-') {
-        is_negative=1;
-    }
-    if (alen==is_negative+1) {
-        return str[is_negative]-'0';
-    }
-    int index = is_negative;
-    for (int i=apow(10,alen-is_negative-1);index<alen;i/=10) {
-        if (is_negative) {
-            result-=(str[index]-'0')*i;
-        } else {
-            result+=(str[index]-'0')*i;
-        }
-        index++;
-    }
-    return result;
-}
+/*int stoi(char* str) {
+    char* c=str;
+    int result=0, is_negative=(*c=='-')?*(c++)*0+1:0;
+    while (*(c++)!='\0') result=result*10+(*c-'0');
+    return result*(is_negative)?-1:1;
+}*/
 
-#define SMODEL_VERSION 1
+// my code-golf solution to stoi (signed, multuple digit, not recursive, 111 bytes long)
+int stoi(char* s){char* c=s-1;int r=0,n=(*s==45)?*c++*0+1:0;while (*(++c)!=0) r=r*10+(*c-48);return r*(1-n*2);}
+
 
 struct lcollection {
     uint32_t letter_count;
@@ -84,13 +66,15 @@ int print_help() {
 \n\
 -i [file]   |  specify input file\n\
 -o [file]   |  creates or writes to a file for output\n\
--l  [i]     |  set target length for output, or change target training memory size\n\
+-l [i]      |  set target length for output, or change target training memory size\n\
+-c [file]   |  combine this smodel with the input file and write to output file\n\
 -t, --train |  changes the mode to training mode, where it will create a model\n\
 -w, --write |  do not print generated text, write to the output file instead\n\
 -h, --help  |  show this menu\n");
 }
 
 char* input_file = NULL;
+char* combine_file_child = NULL;
 char* output_file = NULL;
 
 int print_len = -1;
@@ -101,7 +85,11 @@ int do_train = 0;
 int lc_size = 2;
 
 // Write model to file and free memory
-void write_smodel(struct smodel* model) {
+void write_smodel(struct smodel* model, int mode) {
+    if (mode<0||mode>2) {
+        printf("write_smodel needs a valid mode");
+        return;
+    }
     if (output_file==NULL){
         printf("Tried to write with no output file?\n");
         return;
@@ -109,53 +97,62 @@ void write_smodel(struct smodel* model) {
     
     FILE* fp;
 
-    fp = fopen(output_file,"wb");
-    if (fp==NULL) {
-        printf("Failed to open file for writing?\n");
-        return;
+    if (mode>0) {
+        fp = fopen(output_file,"wb");
+        if (fp==NULL) {
+            printf("Failed to open file for writing?\n");
+            return;
+        }
     }
 
-    fwrite(&model->version,1,1,fp); // version
 
     uint32_t thingyi = strlen(model->name)+1;
-    
-    fwrite(&thingyi,2,1,fp); // name length
-    fwrite(model->name,1,strlen(model->name)+1,fp); // name
-    
-    free(model->name);
 
-    
-    fwrite(&model->before_length,1,1,fp); // before length
-    fwrite(&model->lc_count,4,1,fp); // lc count
+    if (mode>0) {
+        fwrite(&model->version,1,1,fp); // version
+        
+        fwrite(&thingyi,2,1,fp); // name length
+        fwrite(model->name,1,strlen(model->name)+1,fp); // name
+        
+        fwrite(&model->before_length,1,1,fp); // before length
+        fwrite(&model->lc_count,4,1,fp); // lc count
+    }
+
+    if (mode!=2)
+        free(model->name);
 
     struct lcollection* curr = &model->lc_first; // selected lcollection
 
     struct lcollection* tofree; // lcollection to free
     int onfirst=1;
     while (1) {
-        fwrite(&curr->letter_count,4,1,fp);
+        if (mode>0) {
+            fwrite(&curr->letter_count,4,1,fp);
 
-        for (int i=0;i<model->before_length;i++) {
-            fwrite(&curr->before[i],1,1,fp);
+            for (int i=0;i<model->before_length;i++) {
+                fwrite(&curr->before[i],1,1,fp);
+            }
+        
+            fwrite(curr->after,1,curr->letter_count,fp);
         }
-        
-        fwrite(curr->after,1,curr->letter_count,fp);
 
-        free(curr->before);
-        free(curr->after);
-        
-        if (curr->next==NULL) {
+        if (curr->next==NULL&&mode!=2) {
             free(curr);
             return;
         }
         tofree=curr;
         curr=curr->next;
-        if (!onfirst)
-            free(tofree);
+        if (mode!=2) {
+            free(curr->before);
+            free(curr->after);
+            if (!onfirst)
+                free(tofree);
+        }
         onfirst=0;
     }
 
-    fclose(fp);
+    if (mode>0)
+        fclose(fp);
 }
 
 // train file into model
@@ -264,8 +261,6 @@ struct smodel* train() {
 
     return model;
 }
-
-#define BLOCK_SIZE 500
 
 void write_char(char ch, FILE* fp) {
     if (fp==NULL) {
@@ -401,7 +396,35 @@ void print_model(struct smodel* model) {
     }
 }
 
+struct smodel* combine_models(struct smodel* parent, struct smodel* child, char* name) {
+
+    struct smodel* model = malloc(sizeof(smodel));
+
+    model->version=SMODEL_VERSION;
+
+    if (name!=NULL) {
+        model->namelen=strlen(name)+1;
+        model->name=malloc(model->namelen);
+        memcpy(model->name,name,model->namelen);
+    } else {
+        // Combine names with "+"
+        model->namelen=parent->namelen+child->namelen+1;
+        model->name=malloc(parent->namelen+child->namelen+1);
+        char* x=model->name;
+        memcpy(x,parent->name,parent->namelen-1);
+        x+=parent->namelen;
+        x[0]='+';
+        x++;
+        memcpy(x,child->name,child->namelen);
+        printf(model->name);
+    }
+
+    return model;
+}
+
 int main(int argc, char* argv[]) {
+    printf("%i",stoi(argv[1]));
+    
     // seed random for possible generation
     srand((unsigned)time(NULL));
     
@@ -421,6 +444,12 @@ int main(int argc, char* argv[]) {
             i++;
             continue;
         }
+        if (cmat(argv[i],"-c")) {
+            combine_file_child=malloc(strlen(argv[i+1])+1);
+            sprintf(combine_file_child,"%s",argv[i+1]);
+            i++;
+            continue;
+        }
         if (cmat(argv[i],"-o")) {
             output_file=malloc(strlen(argv[i+1])+1);
             sprintf(output_file,"%s",argv[i+1]);
@@ -434,8 +463,25 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    if (combine_file_child!=NULL&&input_file!=NULL&&output_file!=NULL) {
+        // combine smodels
+        struct smodel* parent = read_file(input_file);
+        struct smodel* child = read_file(combine_file_child);
+
+        struct smodel* combination = combine_models(parent,child,NULL);
+
+        // free models without writing
+        write_smodel(parent, SMODEL_FREE);
+        write_smodel(child, SMODEL_FREE); 
+
+        // write model
+        write_smodel(combination, SMODEL_WRITEFREE);
+
+        return 0;
+    }
+
     if (do_train) {
-        if (input_file!=NULL&output_file!=NULL) {
+        if (input_file!=NULL&&output_file!=NULL) {
             if (print_len!=-1) {
                 lc_size=print_len;
             }
@@ -445,13 +491,13 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
 
-            write_smodel(model);
+            write_smodel(model, SMODEL_WRITEFREE);
 
             return 0;
         }
     }
 
-    if (input_file!=NULL&&!do_train) {
+    if (input_file!=NULL&&!do_train&&combine_file_child==NULL) {
         struct smodel* model = read_file(input_file);
 
         if (model==NULL) {
