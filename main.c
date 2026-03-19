@@ -65,7 +65,6 @@ int print_help() {
 -l [i]      |  set target length for output, or change target training memory size\n\
 -c [file]   |  combine this smodel with the input file and write to output file\n\
 -t, --train |  changes the mode to training mode, where it will create a model\n\
--w, --write |  do not print generated text, write to the output file instead\n\
 -h, --help  |  show this menu\n");
 }
 
@@ -182,6 +181,8 @@ struct smodel* train() {
 
     uint32_t size;
 
+    printf("Training model: \033[s");
+
     struct lcollection* lc_last=&model->lc_first;
 
     if (fseek(fp, 0, SEEK_END) == 0) {
@@ -190,6 +191,10 @@ struct smodel* train() {
     fseek(fp, 0, SEEK_SET);
 
     while (index<size) {
+        if (index%(size/100)==0) {
+            printf("\033[u%i%%",(int)(100*((float)index/size))+1);
+            fflush(stdout);
+        }
         if (index>lc_size) {
             int found_index=-1;
             struct lcollection* cur=&model->lc_first;
@@ -247,20 +252,16 @@ struct smodel* train() {
         index++;
     }
 
+    printf("\n");
+
     free(lc);
     fclose(fp);
 
     return model;
 }
 
-void write_char(char ch, FILE* fp) {
-    if (fp==NULL) {
-        printf("%c",ch);
-    } else {
-        fwrite(&ch,1,1,fp);
-    }
-}
 void generate(struct smodel* model, int target, int dowrite) {
+    
     char* lc = malloc((size_t)model->before_length);
 
     FILE* fp=NULL;
@@ -272,10 +273,28 @@ void generate(struct smodel* model, int target, int dowrite) {
         }
     }
 
+    #define BUFFER_SIZE 500
+
+    char buffer[BUFFER_SIZE] = {};
+    int buffer_count=0;
+
+    void write_char(char ch) {
+        if (buffer_count==BUFFER_SIZE-1) {
+            fwrite(&buffer[0],1,buffer_count+1,(fp==NULL)?stdout:fp);
+            buffer_count=0;
+        } else {
+            buffer[buffer_count]=ch;
+            buffer_count++;
+        }
+    }
+
+    if (dowrite)
+        printf("Generating file: \033[s");
+
     // populate lc with first values
     for (int i=0;i<model->before_length;i++) {
         lc[i]=model->lc_first.before[i];
-        write_char(lc[i],fp);
+        write_char(lc[i]);
     }
 
     for (int i=model->before_length;i<target;i++) {
@@ -296,14 +315,19 @@ void generate(struct smodel* model, int target, int dowrite) {
         if (!wasfound) { // No letter found to come next, presume end of file, but to match exact file length i reset the context
             for (int i=0;i<model->before_length;i++) {
                 lc[i]=model->lc_first.before[i];
-                write_char(lc[i],fp);
+                write_char(lc[i]);
             }
             continue;
         }
 
+        if (i%(target/100)==0&&dowrite) {
+            printf("\033[u%i%%",(int)(100*((float)i/target))+1);
+            fflush(stdout);
+        }
+
         // Randomly pick letter
         char chosen = curr->after[rand()%curr->letter_count];
-        write_char(chosen,fp);
+        write_char(chosen);
 
         for (int x=0;x<model->before_length;x++) {
             if (x==model->before_length-1) {
@@ -314,6 +338,9 @@ void generate(struct smodel* model, int target, int dowrite) {
         }
     }
 
+    fwrite(&buffer[0],1,buffer_count+1,(fp==NULL)?stdout:fp);
+    if (dowrite)
+        printf("\n");
     if (fp!=NULL) {
         fclose(fp);
     }
