@@ -9,7 +9,8 @@
 #define SMODEL_WRITEFREE 1
 #define SMODEL_FREE 0
 
-#define SMODEL_VERSION 1
+#define SMODEL_VERSION 2
+#define SMODEL_MAGIC_NUMBER 6767
 
 // compare strings function
 int cmat(char* a, char* b) {
@@ -35,7 +36,7 @@ int stoi(char* s){char* c=s-1;int r=0,n=(*s==45)?*c++*0+1:0;while (*(++c)!=0) r=
 
 struct lcollection {
     uint32_t letter_count;
-    char* before;
+    uint32_t before;
     char* after;
     int set;
 
@@ -44,14 +45,15 @@ struct lcollection {
 
 struct smodel {
     uint8_t version;
+    uint16_t magic_number;
 
     uint16_t name_length;
     char* name;
 
     uint8_t before_length;
 
-    /*uint32_t file_len;
-    char* sfile;*/
+    uint32_t file_length;
+    char* sfile;
 
     uint32_t lc_count;
     struct lcollection lc_first;
@@ -103,14 +105,20 @@ void write_smodel(struct smodel* model, int mode) {
     if (mode>0) {
         fwrite(&model->version,1,1,fp); // version
         
+        fwrite(&model->magic_number,2,1,fp);
+        
         fwrite(&model->name_length,2,1,fp); // name length
         fwrite(model->name,1,model->name_length,fp); // name
+
+        fwrite(&model->file_length,2,1,fp); // file length
+        fwrite(model->sfile,1,model->file_length,fp); // file contents
         
         fwrite(&model->before_length,1,1,fp); // before length
         fwrite(&model->lc_count,4,1,fp); // lc count
     }
 
     if (mode!=2)
+        free(model->sfile);
         free(model->name);
 
     struct lcollection* curr = &model->lc_first; // selected lcollection
@@ -121,15 +129,12 @@ void write_smodel(struct smodel* model, int mode) {
         if (mode>0) {
             fwrite(&curr->letter_count,4,1,fp);
 
-            for (int i=0;i<model->before_length;i++) {
-                fwrite(&curr->before[i],1,1,fp);
-            }
+            fwrite(&curr->before,4,1,fp);
         
             fwrite(curr->after,1,curr->letter_count,fp);
         }
 
         if (mode!=2) {
-            free(curr->before);
             free(curr->after);
         }
         if (curr->next==NULL&&mode!=2) {
@@ -170,6 +175,12 @@ struct smodel* train() {
     model->name=malloc(sizeof(char)*(strlen(input_file)+1));
     model->name_length=strlen(input_file)+1;
     snprintf(model->name,(strlen(input_file)+1),"%s",input_file);
+
+    fseek(fp, 0L, SEEK_END);
+    long file_size = ftell(fp);
+    
+    model->file_length=0;
+    model->sfile=file_size;
 
     model->before_length=lc_size;
     model->lc_count=0;
