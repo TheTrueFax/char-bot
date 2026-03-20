@@ -172,6 +172,7 @@ struct smodel* train() {
 
     struct smodel* model = malloc(sizeof(struct smodel));
     model->version=SMODEL_VERSION;
+    model->magic_number=SMODEL_MAGIC_NUMBER;
     model->name=malloc(sizeof(char)*(strlen(input_file)+1));
     model->name_length=strlen(input_file)+1;
     snprintf(model->name,(strlen(input_file)+1),"%s",input_file);
@@ -180,7 +181,7 @@ struct smodel* train() {
     long file_size = ftell(fp);
     
     model->file_length=0;
-    model->sfile=file_size;
+    model->sfile=malloc(file_size);
 
     model->before_length=lc_size;
     model->lc_count=0;
@@ -372,6 +373,13 @@ struct smodel* read_file(char* filename) {
     uint8_t version;
     fread(&version, 1, 1, fp);
 
+    uint16_t magic_number;
+    fread(&magic_number, 2, 1, fp);
+
+    if (magic_number!=SMODEL_MAGIC_NUMBER) {
+        printf("File is invalid or outdated\n");
+    }
+
     if (version!=SMODEL_VERSION) {
         printf("model version %i not supported",version);
         return NULL;
@@ -381,19 +389,29 @@ struct smodel* read_file(char* filename) {
     fread(&namelen, 2, 1, fp);
 
     model->version=SMODEL_VERSION;
+    model->magic_number=SMODEL_MAGIC_NUMBER;
     model->name_length=namelen;
     model->name=malloc(namelen);
 
     fread(model->name, 1, namelen, fp);
 
     fread(&model->before_length, 1, 1, fp);
+
+    uint32_t sfile_size;
+    fread(&sfile_size, 4, 1, fp);
+
+    char* sfile = malloc(sfile_size);
+
+    fread(sfile, 1, sfile_size, fp);
+
     fread(&model->lc_count, 4, 1, fp);
     
     struct lcollection* curr = &model->lc_first;
     for (int i=0;i<model->lc_count;i++) {
         fread(&curr->letter_count, 4, 1, fp);
-        curr->before = malloc(model->before_length);
-        fread(curr->before, 1, model->before_length, fp);
+        //curr->before = malloc(model->before_length);
+        //fread(curr->before, 1, model->before_length, fp);
+        fread(curr->before, 4, 1, fp);
         
         curr->after = malloc(curr->letter_count);
         fread(curr->after, 1, curr->letter_count, fp);
@@ -436,7 +454,7 @@ struct smodel* combine_models(struct smodel* parent1, struct smodel* child1, cha
     struct smodel* model = malloc(sizeof(struct smodel));
 
     model->version=SMODEL_VERSION;
-
+    model->magic_number=SMODEL_MAGIC_NUMBER;
     if (name!=NULL) {
         model->name_length=strlen(name)+1;
         model->name=malloc(model->name_length);
